@@ -29,8 +29,8 @@ class ResnetGenerator64(nn.Module):
         mapping = list()
         self.mapping = nn.Sequential(*mapping)
 
-        self.mask_regress = MaskRegressNet(num_w+2, map_size=64)
-        
+        self.mask_regress = MaskRegressNetv1(num_w+2, map_size=64)
+
         # self.self_attn = SelfAttn(num_w + 4)
         self.style_mapping = nn.Sequential(
             nn.utils.spectral_norm(nn.Linear(z_dim, z_dim)),
@@ -43,23 +43,25 @@ class ResnetGenerator64(nn.Module):
 
         print(f"ResnetGenerator64 initialized")
 
-
     def forward(self, z, bbox, z_im=None, y=None, return_mask=False):
         b, o = z.size(0), z.size(1)
         z = z.cuda()
         bbox = bbox.cuda()
-        
+
         label_embedding = self.label_embedding(y)
 
         # latent vector self-attention
         # mask_latent_vector = self.self_attn(torch.cat([label_embedding, z, bbox], dim=2)) # b*o*(num_w+4)
-        mask_latent_vector = torch.cat([label_embedding, z, bbox[:,:,2:]], dim=2) # b*o*(num_w+2)
+        mask_latent_vector = torch.cat(
+            [label_embedding, z, bbox[:, :, 2:]], dim=2)  # b*o*(num_w+2)
         if return_mask:
-            mask, raw_mask = self.mask_regress(mask_latent_vector, bbox, return_raw=True)
+            mask, raw_mask = self.mask_regress(
+                mask_latent_vector, bbox, return_raw=True)
         else:
             mask = self.mask_regress(mask_latent_vector, bbox)
-        w = torch.cat( [label_embedding, self.style_mapping(z.view(b*o, -1)).view(b,o,-1)], dim=2)  # b*o*num_w
-        
+        w = torch.cat([label_embedding, self.style_mapping(
+            z.view(b*o, -1)).view(b, o, -1)], dim=2)  # b*o*num_w
+
         if z_im is None:
             z_im = torch.randn((b, self.z_dim), device=z.device)
 
@@ -82,6 +84,7 @@ class ResnetGenerator64(nn.Module):
                 torch.nn.init.orthogonal_(k[1])
             if k[0][-4:] == 'bias':
                 torch.nn.init.constant_(k[1], 0)
+
 
 class ResnetGenerator128(nn.Module):
     def __init__(self, ch=64, z_dim=128, num_classes=10, output_dim=3):
@@ -107,7 +110,7 @@ class ResnetGenerator128(nn.Module):
         mapping = list()
         self.mapping = nn.Sequential(*mapping)
 
-        self.mask_regress = MaskRegressNet(num_w+2, map_size=128)
+        self.mask_regress = MaskRegressNetv1(num_w+2, map_size=128)
 
         self.style_mapping = nn.Sequential(
             nn.utils.spectral_norm(nn.Linear(z_dim, z_dim)),
@@ -122,16 +125,19 @@ class ResnetGenerator128(nn.Module):
     def forward(self, z, bbox, z_im=None, y=None, return_mask=False):
         b, o = z.size(0), z.size(1)
         z, bbox = z.cuda(), bbox.cuda()
-        
+
         label_embedding = self.label_embedding(y)
 
-        mask_latent_vector = torch.cat([label_embedding, z, bbox[:,:,2:]], dim=2) # b*o*(num_w+2)
+        mask_latent_vector = torch.cat(
+            [label_embedding, z, bbox[:, :, 2:]], dim=2)  # b*o*(num_w+2)
         if return_mask:
-            mask, raw_mask = self.mask_regress(mask_latent_vector, bbox, return_raw=True)
+            mask, raw_mask = self.mask_regress(
+                mask_latent_vector, bbox, return_raw=True)
         else:
             mask = self.mask_regress(mask_latent_vector, bbox)
-        w = torch.cat( [label_embedding, self.style_mapping(z.view(b*o, -1)).view(b,o,-1)], dim=2)  # b*o*num_w
-        
+        w = torch.cat([label_embedding, self.style_mapping(
+            z.view(b*o, -1)).view(b, o, -1)], dim=2)  # b*o*num_w
+
         if z_im is None:
             z_im = torch.randn((b, self.z_dim), device=z.device)
 
@@ -159,7 +165,6 @@ class ResnetGenerator128(nn.Module):
                 torch.nn.init.constant_(k[1], 0)
 
 
-
 class ResnetGenerator256(nn.Module):
     def __init__(self, ch=64, z_dim=128, num_classes=10, output_dim=3):
         super(ResnetGenerator256, self).__init__()
@@ -168,7 +173,7 @@ class ResnetGenerator256(nn.Module):
         self.label_embedding = nn.Embedding(num_classes, 192)
         self.z_dim = z_dim
         num_w = z_dim + self.label_embedding.embedding_dim
-        
+
         channels = [16, 8, 8, 4, 4, 2, 1]
         self.fc = nn.utils.spectral_norm(nn.Linear(z_dim, 4*4*channels[0]*ch))
 
@@ -177,18 +182,17 @@ class ResnetGenerator256(nn.Module):
             res.append(ByPassFilter(
                 ResBlockG(ch*channel_in, ch*channel_out, upsample=True, num_w=num_w)))
         self.res = nn.Sequential(*res)
-        
+
         self.final = nn.Sequential(nn.BatchNorm2d(ch),
                                    nn.LeakyReLU(0.01),
                                    conv2d(ch, output_dim, 3, 1, 1),
                                    nn.Tanh())
-        
-        
+
         # mapping function
         mapping = list()
         self.mapping = nn.Sequential(*mapping)
 
-        self.mask_regress = MaskRegressNet(num_w+2, map_size=256)
+        self.mask_regress = MaskRegressNetv1(num_w+2, map_size=256)
 
         self.style_mapping = nn.Sequential(
             nn.utils.spectral_norm(nn.Linear(z_dim, z_dim)),
@@ -203,16 +207,19 @@ class ResnetGenerator256(nn.Module):
     def forward(self, z, bbox, z_im=None, y=None, return_mask=False):
         b, o = z.size(0), z.size(1)
         z, bbox = z.cuda(), bbox.cuda()
-        
+
         label_embedding = self.label_embedding(y)
 
-        mask_latent_vector = torch.cat([label_embedding, z, bbox[:,:,2:]], dim=2) # b*o*(num_w+2)
+        mask_latent_vector = torch.cat(
+            [label_embedding, z, bbox[:, :, 2:]], dim=2)  # b*o*(num_w+2)
         if return_mask:
-            mask, raw_mask = self.mask_regress(mask_latent_vector, bbox, return_raw=True)
+            mask, raw_mask = self.mask_regress(
+                mask_latent_vector, bbox, return_raw=True)
         else:
             mask = self.mask_regress(mask_latent_vector, bbox)
-        w = torch.cat( [label_embedding, self.style_mapping(z.view(b*o, -1)).view(b,o,-1)], dim=2)  # b*o*num_w
-        
+        w = torch.cat([label_embedding, self.style_mapping(
+            z.view(b*o, -1)).view(b, o, -1)], dim=2)  # b*o*num_w
+
         if z_im is None:
             z_im = torch.randn((b, self.z_dim), device=z.device)
 
@@ -231,11 +238,12 @@ class ResnetGenerator256(nn.Module):
             if k[0][-4:] == 'bias':
                 torch.nn.init.constant_(k[1], 0)
 
+
 class ByPassFilter(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-        
+
     def forward(self, args):
         x = self.model(*args)
-        return [x] + args[1:] # These are w and masks
+        return [x] + args[1:]  # These are w and masks

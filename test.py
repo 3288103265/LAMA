@@ -14,7 +14,7 @@ import seaborn as sns
 from compute_dists_dirs import DSscore
 from data.cocostuff_loader import *
 from data.vg import *
-from model.resnet_generator import *
+from model.resnet_generator_v2 import *
 from utils.util import *
 from data import get_dataset
 

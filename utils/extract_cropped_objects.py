@@ -32,7 +32,8 @@ def main(args):
         os.makedirs(os.path.join(save_path, str(idx)), exist_ok = True)
 
     for idx, data in tqdm(enumerate(dataloader)):
-        real_image, label, bbox = data
+        print(len(data))
+        real_image, label, bbox, _ ,_ = data
         bbox[:, :, 2] = (bbox[:, :, 2] + bbox[:, :, 0]).mul(real_image.size(3))  
         bbox[:, :, 3] = (bbox[:, :, 3] + bbox[:, :, 1]).mul(real_image.size(2))
         bbox[:, :, 0] = bbox[:, :, 0].mul(real_image.size(3))

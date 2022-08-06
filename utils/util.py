@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision.utils import make_grid
-from model import ResBlockG, ResBlockD, MaskRegressNet
+from model import ResBlockG, ResBlockD, MaskRegressNetv1
 
 def crop_resize(image, bbox, imsize=64, cropsize=28, label=None):
     """"
@@ -61,7 +61,7 @@ class HiddenFeatureRecoder():
         self.model = model
         self.hiddenFeature = dict()
         self.handles = dict()
-        self.filter_list = [ResBlockG, ResBlockD, MaskRegressNet]
+        self.filter_list = [ResBlockG, ResBlockD, MaskRegressNetv1]
 
     def hook(self):    
         for name, layer in self.model.named_modules():

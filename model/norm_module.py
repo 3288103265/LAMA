@@ -149,20 +149,18 @@ class SpatialAdaptiveBatchNorm2d(nn.BatchNorm2d):
 
 from .sync_batchnorm import SynchronizedBatchNorm2d
 
-class SpatialAdaptiveSynBatchNorm2d(nn.BatchNorm2d):
-    def __init__(self, num_features, num_w=512, eps=1e-5, momentum=0.1, affine=False,
+
+class SpatialAdaptiveSynBatchNorm2d(nn.Module):
+    def __init__(self, num_features, num_w=512, batchnorm_func=SynchronizedBatchNorm2d, eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=True):
-        super(SpatialAdaptiveSynBatchNorm2d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats
-        )
+        super(SpatialAdaptiveSynBatchNorm2d, self).__init__()
         # projection layer
-        self.weight_proj = nn.utils.spectral_norm(nn.Linear(num_w, num_features))
+        self.num_features = num_features
+        self.weight_proj = nn.utils.spectral_norm(
+            nn.Linear(num_w, num_features))
         self.bias_proj = nn.utils.spectral_norm(nn.Linear(num_w, num_features))
-        # self.weight_proj = nn.Linear(num_w, num_features)
-        # self.bias_proj = nn.Linear(num_w, num_features)
-        self.batch_norm2d = SynchronizedBatchNorm2d(num_features, eps=self.eps, affine=False)
-        
-        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.batch_norm2d = batchnorm_func(num_features, eps=eps, momentum=momentum,
+                                           affine=affine)
 
     def forward(self, x, vector, bbox):
         """
@@ -171,27 +169,195 @@ class SpatialAdaptiveSynBatchNorm2d(nn.BatchNorm2d):
         :param bbox: bbox map (b, o, h, w)
         :return:
         """
-        self._check_input_dim(x)
+        # self._check_input_dim(x)
         output = self.batch_norm2d(x)
 
-        b, o, _, _ = bbox.size()
+        b, o, bh, bw = bbox.size()
         _, _, h, w = x.size()
-        bbox = F.interpolate(bbox, size=(h, w), mode='bilinear', align_corners=False)
+        if bh != h or bw != w:
+            bbox = F.interpolate(bbox, size=(h, w), mode='bilinear')
         # calculate weight and bias
         weight, bias = self.weight_proj(vector), self.bias_proj(vector)
 
         weight, bias = weight.view(b, o, -1), bias.view(b, o, -1)
 
-        # bbox.unsqueeze(2) -> b, o, 1, h, w
-        # weight.unsqueeze(-1).unsqueeze(-1) ->  b, o, num_features, 1, 1
-        # torch.sum() -> b, num_features, h, w  
-        # torch.sum(bbox.unsqueeze(2)) -> b, 1, h, w
         weight = torch.sum(bbox.unsqueeze(2) * weight.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=False) / \
-                 (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
+            (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6) + 1
         bias = torch.sum(bbox.unsqueeze(2) * bias.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=False) / \
-               (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
-        affined = weight * output + bias
-        return output + self.alpha.clamp(-1,1) * affined
+            (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
+        return weight * output + bias
 
     def __repr__(self):
         return self.__class__.__name__ + '(' + str(self.num_features) + ')'
+
+
+class SENorm2d(nn.Module):
+    def __init__(self, num_features, num_w=512,
+                 batchnorm_func=SynchronizedBatchNorm2d, eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=True):
+        super(SENorm2d, self).__init__()
+        # projection layer
+        self.num_features = num_features
+        self.weight_proj = conv2d(
+            num_w, num_features, kernel_size=3, stride=1, pad=1)
+        self.bias_proj = conv2d(num_w, num_features,
+                                kernel_size=3, stride=1, pad=1)
+        self.batch_norm2d = batchnorm_func(num_features, eps=eps, momentum=momentum,
+                                           affine=affine)
+
+    def forward(self, x, vector, bbox, vis=False):
+        """
+        :param x: input feature map (b, c, h, w)
+        :param vector: latent vector (b*o, dim_w)
+        :param bbox: bbox map (b, o, h, w)
+        :return:
+        """
+        # self._check_input_dim(x)
+        output = self.batch_norm2d(x)
+
+        b, o, bh, bw = bbox.size()
+        _, _, h, w = x.size()
+        if bh != h or bw != w:
+            bbox = F.interpolate(bbox, size=(h, w), mode='bilinear')
+        vector = F.interpolate(vector, size=(
+            h, w), mode='bilinear', align_corners=True)
+        # calculate weight and bias
+        weight, bias = self.weight_proj(vector), self.bias_proj(vector)
+
+        weight, bias = weight.view(b, o, -1, h, w), bias.view(b, o, -1, h, w)
+
+        weight = torch.sum(bbox.unsqueeze(2) * weight, dim=1, keepdim=False) / \
+            (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6) + 1
+        bias = torch.sum(bbox.unsqueeze(2) * bias, dim=1, keepdim=False) / \
+            (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
+        if vis:
+            return weight * output + bias, weight, bias
+        return weight * output + bias
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(' + str(self.num_features) + ')'
+
+# class SpatialAdaptiveSynBatchNorm2d(nn.BatchNorm2d):
+#     def __init__(self, num_features, num_w=512, eps=1e-5, momentum=0.1, affine=False,
+#                  track_running_stats=True):
+#         super(SpatialAdaptiveSynBatchNorm2d, self).__init__(
+#             num_features, eps, momentum, affine, track_running_stats
+#         )
+#         # projection layer
+#         self.weight_proj = nn.utils.spectral_norm(nn.Linear(num_w, num_features))
+#         self.bias_proj = nn.utils.spectral_norm(nn.Linear(num_w, num_features))
+#         # self.weight_proj = nn.Linear(num_w, num_features)
+#         # self.bias_proj = nn.Linear(num_w, num_features)
+#         self.batch_norm2d = SynchronizedBatchNorm2d(num_features, eps=self.eps, affine=False)
+        
+#         self.alpha = nn.Parameter(torch.tensor(0.0))
+
+#     def forward(self, x, vector, bbox):
+#         """
+#         :param x: input feature map (b, c, h, w)
+#         :param vector: latent vector (b*o, dim_w)
+#         :param bbox: bbox map (b, o, h, w)
+#         :return:
+#         """
+#         self._check_input_dim(x)
+#         output = self.batch_norm2d(x)
+
+#         b, o, _, _ = bbox.size()
+#         _, _, h, w = x.size()
+#         bbox = F.interpolate(bbox, size=(h, w), mode='bilinear', align_corners=False)
+#         # calculate weight and bias
+#         weight, bias = self.weight_proj(vector), self.bias_proj(vector)
+
+#         weight, bias = weight.view(b, o, -1), bias.view(b, o, -1)
+
+#         # bbox.unsqueeze(2) -> b, o, 1, h, w
+#         # weight.unsqueeze(-1).unsqueeze(-1) ->  b, o, num_features, 1, 1
+#         # torch.sum() -> b, num_features, h, w  
+#         # torch.sum(bbox.unsqueeze(2)) -> b, 1, h, w
+#         weight = torch.sum(bbox.unsqueeze(2) * weight.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=False) / \
+#                  (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
+#         bias = torch.sum(bbox.unsqueeze(2) * bias.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=False) / \
+#                (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
+#         affined = weight * output + bias
+#         return output + self.alpha.clamp(-1,1) * affined
+
+
+
+#     def __repr__(self):
+#         return self.__class__.__name__ + '(' + str(self.num_features) + ')'
+
+
+class SPADENorm2d(nn.Module):
+    def __init__(self, num_features, num_w=512, batchnorm_func=SynchronizedBatchNorm2d, eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=True):
+        super(SPADENorm2d, self).__init__()
+        # projection layer
+        self.num_features = num_features
+        self.weight_proj = conv2d(
+            num_w, num_features, kernel_size=1, stride=1, pad=0)
+        self.bias_proj = conv2d(num_w, num_features,
+                                kernel_size=1, stride=1, pad=0)
+        self.batch_norm2d = batchnorm_func(num_features, eps=eps, momentum=momentum,
+                                           affine=affine)
+
+    def forward(self, x, vector, bbox, vis=False):
+        """
+        :param x: input feature map (b, c, h, w)
+        :param vector: latent vector (b*o, dim_w)
+        :param bbox: bbox map (b, o, h, w)
+        :return:
+        """
+        # self._check_input_dim(x)
+        output = self.batch_norm2d(x)
+
+        b, o, bh, bw = bbox.size()
+        _, _, h, w = x.size()
+
+        # vector = vector.view(b, o, -1)
+        # bbox = torch.sum(bbox.unsqueeze(2) * vector.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=False) / \
+        #        (torch.sum(bbox.unsqueeze(2), dim=1, keepdim=False) + 1e-6)
+        if bh != h or bw != w:
+            bbox = F.interpolate(bbox, size=(h, w), mode='bilinear')
+        # calculate weight and bias
+        weight, bias = self.weight_proj(bbox) + 1, self.bias_proj(bbox)
+
+        if vis:
+            return weight * output + bias, weight, bias
+        return weight * output + bias
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(' + str(self.num_features) + ')'
+
+
+class VNorm2d(nn.Module):
+    def __init__(self, num_features, num_w=512, batchnorm_func=SynchronizedBatchNorm2d, eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=True):
+        super(VNorm2d, self).__init__()
+        # projection layer
+        self.num_features = num_features
+        self.weight_proj = conv2d(
+            num_w, num_features, kernel_size=1, stride=1, pad=0)
+        self.bias_proj = conv2d(num_w, num_features,
+                                kernel_size=1, stride=1, pad=0)
+        self.batch_norm2d = batchnorm_func(num_features, eps=eps, momentum=momentum,
+                                           affine=affine)
+
+    def forward(self, x, vector, bbox, vis=False):
+        """
+        :param x: input feature map (b, c, h, w)
+        :param vector: latent vector (b*o, dim_w)
+        :param bbox: bbox map (b, o, h, w)
+        :return:
+        """
+        # self._check_input_dim(x)
+        output = self.batch_norm2d(x)
+        return output
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(' + str(self.num_features) + ')'
+def conv2d(in_feat, out_feat, kernel_size=3, stride=1, pad=1, spectral_norm=True):
+    conv = nn.Conv2d(in_feat, out_feat, kernel_size, stride, pad)
+    if spectral_norm:
+        return nn.utils.spectral_norm(conv, eps=1e-4)
+    else:
+        return conv

@@ -1,12 +1,12 @@
 import json, sys, os, argparse
 
-import imageio
 from tqdm import tqdm
 
-sys.path.append(os.getcwd()) 
+sys.path.append(os.getcwd())
 from data.cocostuff_loader import *
 from data.vg import *
 from data import get_dataset
+from utils.misc import imsave as imwrite
 
 def get_dataloader(dataset = 'coco', img_size=128):
     dataset = get_dataset(dataset, img_size, left_right_flip=False, train=False)
@@ -25,8 +25,8 @@ def main(args):
 
     for idx, data in tqdm(enumerate(dataloader)):
         real_image, _, _ = data
-        imageio.imwrite(f"{save_path}/sample_{idx}.png",
-                    real_image[0].mul_(0.5).add_(0.5).mul_(255).to(torch.uint8).numpy().transpose(1, 2, 0))
+        imwrite(f"{save_path}/sample_{idx}.png",
+                    real_image[0].cpu().detach().numpy().transpose(1, 2, 0)*0.5+0.5)
     print(f"Saved in {save_path}")
 
 if __name__ == "__main__":

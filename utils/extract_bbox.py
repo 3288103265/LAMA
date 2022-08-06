@@ -29,7 +29,7 @@ def main(args):
                 bbox[0][:args.max_obj_num], 
                 label.flatten()[:args.max_obj_num], 
                 img_size=img_size, 
-                outImage=True)
+                outImage=True, dataset=args.dataset)
         img.save(os.path.join(save_path, f"sample_{idx}_bbox.png"))
 
     print(f"Saved in {save_path}")

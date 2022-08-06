@@ -4,6 +4,7 @@ import pathlib
 from PIL import Image
 from tqdm import tqdm
 import imageio
+from utils.misc import imsave as imwrite
 import numpy as np
 import torch
 from data.vg import VgSceneGraphDataset
@@ -38,8 +39,8 @@ def main(args):
                     drop_last=False, shuffle=False, num_workers=1)
         for idx, data in tqdm(enumerate(dataloader)):
             real_image, _, _ = data
-            imageio.imwrite(f"{save_path}/sample_{idx}.png",
-                        real_image[0].mul_(0.5).add_(0.5).mul_(255).to(torch.uint8).numpy().transpose(1, 2, 0))
+            imwrite(f"{save_path}/sample_{idx}.png",
+                    real_image[0].cpu().detach().numpy().transpose(1, 2, 0)*0.5+0.5)
     else:
         pass
 
